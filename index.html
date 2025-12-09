@@ -1,320 +1,269 @@
-<!doctype html>
-<html lang="en">
+<!DOCTYPE html>
+<html>
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
-  <title>Black Sheep Flappy — Burgers & Wings</title>
-  <style>
-    /* Basic reset + mobile-first canvas layout */
-    html,body{height:100%;margin:0;background:linear-gradient(#87CEEB,#cfefff);font-family:Inter,system-ui,Arial}
-    #gameWrap{display:flex;align-items:center;justify-content:center;height:100%;}
-    canvas{background:transparent;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.15)}
-    .ui{position:absolute;left:12px;top:12px;color:#111;font-weight:700;text-shadow:0 1px 0 rgba(255,255,255,0.4)}
-    .ui .score{font-size:22px}
-    .controls{position:fixed;right:12px;top:12px;text-align:right}
-    .hint{position:fixed;left:50%;transform:translateX(-50%);bottom:18px;background:rgba(255,255,255,0.85);padding:8px 12px;border-radius:12px;font-weight:600}
-    .menu{position:fixed;inset:0;display:flex;align-items:center;justify-content:center}
-    .card{background:rgba(255,255,255,0.98);padding:18px;border-radius:12px;box-shadow:0 10px 30px rgba(0,0,0,0.12);max-width:420px;text-align:center}
-    button{appearance:none;border:0;background:#111;color:#fff;padding:10px 14px;border-radius:8px;font-weight:700;margin-top:10px}
-    small{display:block;margin-top:6px;color:#555}
-  </style>
+<meta charset="UTF-8" />
+<title>Flappy Black Sheep</title>
+<style>
+body {
+  margin: 0;
+  background: #87CEEB;
+  overflow: hidden;
+  touch-action: manipulation;
+  font-family: Arial, sans-serif;
+}
+
+#gameCanvas {
+  display: block;
+  margin: 0 auto;
+  background: #87CEEB;
+}
+
+#startScreen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  background: rgba(0,0,0,0.6);
+  padding: 30px 40px;
+  color: white;
+  font-size: 22px;
+  border-radius: 12px;
+  text-align: center;
+}
+</style>
 </head>
 <body>
-  <div id="gameWrap">
-    <canvas id="game"></canvas>
-  </div>
 
-  <div class="ui">
-    <div class="score">Score: <span id="score">0</span></div>
-    <div class="stats"><small>Pick burgers & wings for bonus</small></div>
-  </div>
-
-  <div class="controls">
-    <div>High: <span id="high">0</span></div>
-  </div>
-
-  <div class="hint" id="hint">Tap or press Space to flap • Eat burgers & wings!</div>
-
-  <div class="menu" id="menu">
-    <div class="card">
-      <h2>Black Sheep Flappy</h2>
-      <p>Help a little black sheep fly through the gaps. Eat burgers and boneless wings for extra points!</p>
-      <button id="startBtn">Start Game</button>
-      <small>Tap the screen or press <strong>Space</strong> to flap. Mobile friendly.</small>
-    </div>
-  </div>
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div id="startScreen">Tap to Start</div>
 
 <script>
-(() => {
-  const canvas = document.getElementById('game');
-  const ctx = canvas.getContext('2d');
-  const DPR = Math.max(1, window.devicePixelRatio || 1);
-  let W = 420, H = 720; // logical size; we'll scale to fit
+// =====================
+// Game Variables
+// =====================
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
 
-  function resize() {
-    const maxW = Math.min(window.innerWidth - 24, 540);
-    const maxH = Math.min(window.innerHeight - 24, 920);
-    const aspect = W/H;
-    let w = maxW, h = Math.round(maxW / aspect);
-    if (h > maxH) { h = maxH; w = Math.round(maxH * aspect); }
-    canvas.style.width = w + 'px';
-    canvas.style.height = h + 'px';
-    canvas.width = Math.round(w * DPR);
-    canvas.height = Math.round(h * DPR);
-    ctx.setTransform(DPR,0,0,DPR,0,0);
-  }
-  resize();
-  window.addEventListener('resize', resize);
+let gameStarted = false;
+let gameOver = false;
 
-  // Game state
-  let game = null;
+// Sheep
+let sheep = {
+  x: 100,
+  y: canvas.height/2,
+  w: 40,
+  h: 40,
+  velocity: 0,
+  gravity: 0.4,
+  jumpStrength: -8
+};
 
-  // Utilities
-  function rand(min,max){return Math.random()*(max-min)+min}
-  function clamp(v,a,b){return Math.max(a,Math.min(b,v))}
+// Pipes (barn fences)
+let pipes = [];
+const pipeWidth = 60;
+const pipeGap = 130;
+let pipeSpeed = 2;
 
-  // Input
-  let tapped = false;
-  function onTap(){ tapped = true }
-  window.addEventListener('touchstart', (e)=>{ e.preventDefault(); onTap(); }, {passive:false});
-  window.addEventListener('mousedown', ()=>onTap());
-  window.addEventListener('keydown', (e)=>{ if(e.code==='Space') onTap(); });
+// Food in sky
+const foods = [
+  "🍕","🌯","🍗","🍟","🌮","🍕","🍗"
+]; // repeating for fun
+let skyFood = [];
+let foodSpeed = 0.5;
 
-  // Audio simple
-  function beep(freq=440, time=0.05, vol=0.1){
-    try{
-      const ctxA = beep.ctx || (beep.ctx = new (window.AudioContext||window.webkitAudioContext)());
-      const o = ctxA.createOscillator();
-      const g = ctxA.createGain();
-      o.type='sine'; o.frequency.value=freq;
-      g.gain.value=vol;
-      o.connect(g); g.connect(ctxA.destination);
-      o.start(); g.gain.exponentialRampToValueAtTime(0.0001, ctxA.currentTime + time);
-      o.stop(ctxA.currentTime + time);
-    }catch(e){/* audio blocked */}
-  }
+// =====================
+// Helpers
+// =====================
+function resetGameState(){
+  sheep.y = canvas.height/2;
+  sheep.velocity = 0;
+  pipes = [];
+  skyFood = [];
+}
 
-  // Entities
-  class Sheep {
-    constructor(x,y){ this.x=x; this.y=y; this.vy=0; this.radius=18; this.rotation=0; this.alive=true; this.combo=0 }
-    flap(){ this.vy = -6.5; this.rotation = -0.6; beep(700,0.06,0.07) }
-    update(dt){ this.vy += 14 * dt; this.y += this.vy; this.rotation = clamp(this.rotation + 3*dt, -0.6, 1.2);
-      if (this.y > H + 100) this.alive=false; if (this.y < -100) this.alive=false; }
-    draw(ctx){ ctx.save(); ctx.translate(this.x,this.y); ctx.rotate(this.rotation);
-      // cartoon sheep body
-      ctx.fillStyle = '#000';
-      ctx.beginPath(); ctx.ellipse(0,0,24,20,0,0,Math.PI*2); ctx.fill();
-      // wool puffs
-      for(let i=0;i<8;i++){ let a=i/8*Math.PI*2; let rx=Math.cos(a)*16, ry=Math.sin(a)*13; ctx.fillStyle='#111'; ctx.beginPath(); ctx.ellipse(rx,ry,9,7,0,0,Math.PI*2); ctx.fill(); }
-      // face
-      ctx.fillStyle = '#222'; ctx.beginPath(); ctx.ellipse(14,3,10,8,0,0,Math.PI*2); ctx.fill();
-      // big cartoon eye
-      ctx.fillStyle = '#fff'; ctx.beginPath(); ctx.arc(16,1,3.4,0,Math.PI*2); ctx.fill(); ctx.fillStyle='#000'; ctx.beginPath(); ctx.arc(16,1,1.6,0,Math.PI*2); ctx.fill();
-      // little smile
-      ctx.strokeStyle='#ff8080'; ctx.lineWidth=2; ctx.beginPath(); ctx.arc(14,5,4,0,Math.PI/2); ctx.stroke();
-      // mini legs
-      ctx.strokeStyle='#000'; ctx.lineWidth=4; ctx.beginPath(); ctx.moveTo(-6,20); ctx.lineTo(-6,28); ctx.moveTo(2,20); ctx.lineTo(2,28); ctx.stroke();
-      ctx.restore();
+// =====================
+// Pipe logic
+// =====================
+function spawnPipe(){
+  const topHeight = Math.random()*200 + 50;
+  pipes.push({
+    x: canvas.width,
+    top: topHeight,
+    bottom: topHeight + pipeGap
+  });
+}
+
+function updatePipes(){
+  for(let i = pipes.length-1;i>=0;i--){
+    pipes[i].x -= pipeSpeed;
+    if(pipes[i].x + pipeWidth < 0){
+      pipes.splice(i,1);
     }
   }
 
-  class Pipe {
-    constructor(x,w,gapY,gapH){ this.x=x; this.w=w; this.gapY=gapY; this.gapH=gapH }
-    update(dt, speed){ this.x -= speed*dt }
-    draw(ctx){
-      // barn fence style
-      ctx.fillStyle = '#a8392d'; // barn red vertical boards
-      ctx.fillRect(this.x, 0, this.w, this.gapY);
-      ctx.fillRect(this.x, this.gapY + this.gapH, this.w, H - (this.gapY + this.gapH));
-      // horizontal fence rails
-      ctx.strokeStyle='#fff'; ctx.lineWidth=4;
-      for(let y=0;y<H;y+=60){ ctx.beginPath(); ctx.moveTo(this.x, y+20); ctx.lineTo(this.x+this.w, y+20); ctx.stroke(); }
+  if(Math.random() < 0.02){
+    spawnPipe();
+  }
+}
+
+// =====================
+// Sky foods
+// =====================
+function spawnSkyFood(){
+  skyFood.push({
+    x: Math.random()*canvas.width,
+    y: Math.random()*200,
+    emoji: foods[Math.floor(Math.random()*foods.length)]
+  });
+}
+
+function updateSkyFood(){
+  for(let i = skyFood.length-1;i>=0;i--){
+    skyFood[i].x -= foodSpeed;
+    if(skyFood[i].x < -50){
+      skyFood.splice(i,1);
     }
   }
 
-  class Pickup {
-    constructor(x,y,type){ this.x=x; this.y=y; this.type=type; this.radius=12; this.collected=false }
-    update(dt,speed){ this.x -= speed*dt }
-    draw(ctx){ if(this.type==='burger') drawBurger(ctx,this.x,this.y);
-      else drawWing(ctx,this.x,this.y);
-    }
+  if(Math.random()<0.01){
+    spawnSkyFood();
   }
+}
 
-  function drawBurger(ctx,x,y){ ctx.save(); ctx.translate(x,y);
-    // bun
-    ctx.fillStyle='#d9994a'; ctx.beginPath(); ctx.ellipse(0,-2,14,9,0,0,Math.PI*2); ctx.fill();
-    // lettuce
-    ctx.fillStyle='#3eb04a'; ctx.beginPath(); ctx.ellipse(0,2,12,5,0,0,Math.PI*2); ctx.fill();
-    // patty
-    ctx.fillStyle='#6b3b2b'; ctx.fillRect(-10,4,20,5);
-    ctx.restore();
-  }
-  function drawWing(ctx,x,y){ ctx.save(); ctx.translate(x,y);
-    ctx.fillStyle='#f7e0b6'; ctx.beginPath(); ctx.ellipse(0,0,12,7,0,0,Math.PI*2); ctx.fill();
-    ctx.fillStyle='#d39f74'; ctx.beginPath(); ctx.ellipse(6,0,4,3,0,0,Math.PI*2); ctx.fill();
-    ctx.restore();
-  }
+// =====================
+// Sheep movement
+// =====================
+function updateSheep(){
+  sheep.velocity += sheep.gravity;
+  sheep.y += sheep.velocity;
 
-  // Main Game class
-  class Game {
-    constructor(){
-      this.reset();
-    }
-    reset(){
-      this.sheep = new Sheep(100,H/2);
-      this.pipes = [];
-      this.pickups = [];
-      this.spawnTimer = 0; this.pipeGap=150; this.pipeW=56;
-      this.speed = 140; this.score = 0; this.high = parseInt(localStorage.getItem('bs_high')||0,10);
-      document.getElementById('high').textContent = this.high;
-      document.getElementById('score').textContent = this.score;
-      this.state = 'ready';
-      this.pickSpawnTimer = 0; this.combo = 0;
-    }
-    start(){ this.state = 'playing'; }
-    update(dt){
-      if(this.state === 'gameover') return;
-      // input
-      if(tapped){ if(this.state==='ready'){ this.start(); }
-        if(this.sheep.alive){ this.sheep.flap(); }
-        tapped = false;
-      }
-      if(this.state==='playing'){
-        this.sheep.update(dt);
-        this.spawnTimer -= dt;
-        if(this.spawnTimer <= 0){ this.spawnTimer = 1.25; // new pipe every ~1.25s
-          const gapH = this.pipeGap + Math.max(0, 20 - Math.floor(this.score/10));
-          const gapY = rand(80, H - 80 - gapH);
-          this.pipes.push(new Pipe(W + 40, this.pipeW, gapY, gapH));
-        }
-        // pickups
-        this.pickSpawnTimer -= dt;
-        if(this.pickSpawnTimer <= 0){ this.pickSpawnTimer = rand(1.8,3.2);
-          const type = Math.random()<0.55 ? 'burger' : 'wing';
-          const y = rand(80, H-80);
-          this.pickups.push(new Pickup(W + 40, y, type));
-        }
-        // update pipes & pickups
-        for(let p of this.pipes) p.update(dt,this.speed);
-        for(let k of this.pickups) k.update(dt,this.speed);
-        // remove offscreen
-        this.pipes = this.pipes.filter(p => p.x + p.w > -40);
-        this.pickups = this.pickups.filter(k => k.x > -40 && !k.collected);
-        // collisions
-        // pipes
-        for(let p of this.pipes){
-          if(this.sheep.x + this.sheep.radius > p.x && this.sheep.x - this.sheep.radius < p.x + p.w){
-            if(this.sheep.y - this.sheep.radius < p.gapY || this.sheep.y + this.sheep.radius > p.gapY + p.gapH){
-              this.hit(); break;
-            }
-          } else {
-            // scoring: pass the pipe
-            if(!p.passed && p.x + p.w < this.sheep.x){ p.passed = true; this.addScore(1); }
-          }
-        }
-        // pickups collisions
-        for(let k of this.pickups){
-          const dx = k.x - this.sheep.x; const dy = k.y - this.sheep.y; const d = Math.sqrt(dx*dx + dy*dy);
-          if(d < k.radius + this.sheep.radius - 4){ // collected
-            k.collected = true; this.collect(k.type);
-          }
-        }
-        // ground collision
-        if(this.sheep.y + this.sheep.radius >= H - 6){ this.sheep.y = H - 6 - this.sheep.radius; this.hit(); }
-        if(!this.sheep.alive) this.hit();
-      }
-    }
-    collect(type){
-      // types: burger: +3, wing: +5 and temporary speed boost
-      if(type==='burger'){ this.addScore(3); this.sheep.combo++; beep(880,0.08,0.09); }
-      else { this.addScore(5); this.sheep.combo+=2; this.speed *= 0.9; setTimeout(()=>{ this.speed /= 0.9; }, 900); beep(520,0.12,0.08); }
-    }
-    addScore(n){ this.score += n; document.getElementById('score').textContent = this.score; }
-    hit(){ if(this.state !== 'gameover'){ this.state='gameover'; beep(160,0.25,0.12); if(this.score > this.high){ this.high = this.score; localStorage.setItem('bs_high', this.high); document.getElementById('high').textContent = this.high; }
-          // show menu with restart
-          showMenu(true, this.score, this.high);
-        }
-    }
-    draw(ctx){
-      // sky gradient already in body; draw background ground
-      ctx.clearRect(0,0,W,H);
-      // parallax clouds and foods
-      // clouds
-      for(let i=0;i<4;i++){ ctx.fillStyle='rgba(255,255,255,0.7)'; ctx.beginPath(); let cx=(i*140 + (Date.now()*0.015))%W -70; ctx.ellipse(cx, 60+(i%3)*14, 40,20,0,0,Math.PI*2); ctx.fill(); }
-      // floating foods in sky
-      const foods=['pizza','burrito','wing','fries','nachos'];
-      for(let i=0;i<foods.length;i++){
-        let fx = (i*200 + (Date.now()*0.03*(i%2?1:-1)))%W -100;
-        let fy = 120 + (i%3)*40;
-        drawSkyFood(ctx,fx,fy,foods[i]);
-      }
-      
-      // pipes
-      for(let p of this.pipes) p.draw(ctx);
-      // pickups
-      for(let k of this.pickups) k.draw(ctx);
-      // ground
-      ctx.fillStyle='#8DB15A'; ctx.fillRect(0,H-6,W,6);
-      // sheep
-      this.sheep.draw(ctx);
-      // HUD handled externally
-      if(this.state==='ready'){
-        ctx.fillStyle='rgba(0,0,0,0.5)'; ctx.font='18px bold sans-serif'; ctx.textAlign='center'; ctx.fillText('Tap to start — eat burgers & wings!', W/2, H/2 + 60);
+  // hit ground or ceiling
+  if(sheep.y + sheep.h > canvas.height || sheep.y < 0){
+    endGame();
+  }
+}
+
+// =====================
+// Collision
+// =====================
+function checkCollision(){
+  for(const p of pipes){
+    // top pipe
+    if(sheep.x + sheep.w > p.x && sheep.x < p.x + pipeWidth){
+      if(sheep.y < p.top || sheep.y + sheep.h > p.bottom){
+        endGame();
       }
     }
   }
+}
 
-  // menu handling
-  const menu = document.getElementById('menu');
-  const startBtn = document.getElementById('startBtn');
-  function showMenu(show, score, high){ if(show){ menu.style.display='flex'; startBtn.textContent = 'Play Again'; if(score!=null){ menu.querySelector('p').textContent = `You scored ${score}. High: ${high}.` } }
-    else menu.style.display='none'; }
+// =====================
+// Draw
+// =====================
+function drawSheep(){
+  // simple cartoon sheep body
+  ctx.save();
+  ctx.fillStyle = "black";
+  ctx.beginPath();
+  ctx.arc(sheep.x + sheep.w/2, sheep.y + sheep.h/2, 20, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
 
-  startBtn.addEventListener('click', ()=>{ showMenu(false); game.reset(); game.start(); });
-
-  // initialize
-  game = new Game();
-
-  // main loop
-  let last = performance.now();
-  function loop(now){
-    const dt = Math.min(0.033, (now - last)/1000);
-    last = now;
-    game.update(dt);
-    game.draw(ctx);
-    requestAnimationFrame(loop);
+function drawPipes(){
+  ctx.fillStyle = "#8B4513"; // barn wood
+  for(const p of pipes){
+    // top
+    ctx.fillRect(p.x, 0, pipeWidth, p.top);
+    // bottom
+    ctx.fillRect(p.x, p.bottom, pipeWidth, canvas.height-p.bottom);
   }
-  requestAnimationFrame(loop);
+}
 
-  // scale logical canvas size to drawing area
-  // We'll maintain internal logical resolution independent of CSS size.
-  function setLogicalSize(w,h){ W=w; H=h; resize(); }
-  setLogicalSize(420,720);
+function drawSkyFood(){
+  ctx.font = "32px serif";
+  for(const f of skyFood){
+    ctx.fillText(f.emoji, f.x, f.y);
+  }
+}
 
-  function drawSkyFood(ctx,x,y,type){ ctx.save(); ctx.translate(x,y);
-    switch(type){
-      case 'pizza':
-        ctx.fillStyle='#f7d26a'; ctx.beginPath(); ctx.moveTo(-12,10); ctx.lineTo(0,-10); ctx.lineTo(12,10); ctx.closePath(); ctx.fill();
-        ctx.fillStyle='#d44'; ctx.beginPath(); ctx.arc(0,0,4,0,Math.PI*2); ctx.fill();
-        break;
-      case 'burrito':
-        ctx.fillStyle='#d9c9a3'; ctx.beginPath(); ctx.ellipse(0,0,12,6,0,0,Math.PI*2); ctx.fill(); break;
-      case 'wing':
-        ctx.fillStyle='#f7e0b6'; ctx.beginPath(); ctx.ellipse(0,0,12,7,0,0,Math.PI*2); ctx.fill(); break;
-      case 'fries':
-        ctx.fillStyle='#e8cc6a'; ctx.fillRect(-8,-4,16,8); break;
-      case 'nachos':
-        ctx.fillStyle='#e8c557'; ctx.beginPath(); ctx.moveTo(-10,6); ctx.lineTo(0,-6); ctx.lineTo(10,6); ctx.closePath(); ctx.fill(); break;
-    }
-    ctx.restore(); }
+// =====================
+// Game Loop
+// =====================
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
 
-  // expose small helpers to page for debugging
-  window.bs = { game, resize };
+  if(!gameStarted){
+    drawSheep();
+    drawSkyFood();
+    return;
+  }
 
-  // helpful hint hide
-  setTimeout(()=>{ const h = document.getElementById('hint'); if(h) h.style.display='none'; }, 4200);
+  updateSheep();
+  updatePipes();
+  updateSkyFood();
+  checkCollision();
 
-})();
+  drawPipes();
+  drawSkyFood();
+  drawSheep();
+
+  if(!gameOver){
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+// =====================
+// Input
+// =====================
+function jump(){
+  sheep.velocity = sheep.jumpStrength;
+}
+
+function handleInput(){
+  if(!gameStarted){
+    startGame();
+  } else if(gameOver){
+    restartGame();
+  } else {
+    jump();
+  }
+}
+
+window.addEventListener("mousedown", handleInput);
+window.addEventListener("touchstart", handleInput);
+
+// =====================
+// State handlers
+// =====================
+function startGame(){
+  document.getElementById("startScreen").style.display = "none";
+  gameStarted = true;
+  gameOver = false;
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame(){
+  gameOver = true;
+  gameStarted = false;
+  document.getElementById("startScreen").innerText = "Tap to Restart";
+  document.getElementById("startScreen").style.display = "block";
+}
+
+function restartGame(){
+  resetGameState();
+  document.getElementById("startScreen").innerText = "";
+  document.getElementById("startScreen").style.display = "none";
+  gameStarted = true;
+  gameOver = false;
+  requestAnimationFrame(gameLoop);
+}
+
+// initial scenic spawns
+for(let i=0;i<5;i++) spawnSkyFood();
+
+drawSheep();
+drawSkyFood();
 </script>
 </body>
 </html>
