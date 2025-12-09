@@ -1,0 +1,269 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8" />
+<title>Flappy Black Sheep</title>
+<style>
+body {
+  margin: 0;
+  background: #87CEEB;
+  overflow: hidden;
+  touch-action: manipulation;
+  font-family: Arial, sans-serif;
+}
+
+#gameCanvas {
+  display: block;
+  margin: 0 auto;
+  background: #87CEEB;
+}
+
+#startScreen {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%,-50%);
+  background: rgba(0,0,0,0.6);
+  padding: 30px 40px;
+  color: white;
+  font-size: 22px;
+  border-radius: 12px;
+  text-align: center;
+}
+</style>
+</head>
+<body>
+
+<canvas id="gameCanvas" width="400" height="600"></canvas>
+<div id="startScreen">Tap to Start</div>
+
+<script>
+// =====================
+// Game Variables
+// =====================
+const canvas = document.getElementById("gameCanvas");
+const ctx = canvas.getContext("2d");
+
+let gameStarted = false;
+let gameOver = false;
+
+// Sheep
+let sheep = {
+  x: 100,
+  y: canvas.height/2,
+  w: 40,
+  h: 40,
+  velocity: 0,
+  gravity: 0.4,
+  jumpStrength: -8
+};
+
+// Pipes (barn fences)
+let pipes = [];
+const pipeWidth = 60;
+const pipeGap = 130;
+let pipeSpeed = 2;
+
+// Food in sky
+const foods = [
+  "🍕","🌯","🍗","🍟","🌮","🍕","🍗"
+]; // repeating for fun
+let skyFood = [];
+let foodSpeed = 0.5;
+
+// =====================
+// Helpers
+// =====================
+function resetGameState(){
+  sheep.y = canvas.height/2;
+  sheep.velocity = 0;
+  pipes = [];
+  skyFood = [];
+}
+
+// =====================
+// Pipe logic
+// =====================
+function spawnPipe(){
+  const topHeight = Math.random()*200 + 50;
+  pipes.push({
+    x: canvas.width,
+    top: topHeight,
+    bottom: topHeight + pipeGap
+  });
+}
+
+function updatePipes(){
+  for(let i = pipes.length-1;i>=0;i--){
+    pipes[i].x -= pipeSpeed;
+    if(pipes[i].x + pipeWidth < 0){
+      pipes.splice(i,1);
+    }
+  }
+
+  if(Math.random() < 0.02){
+    spawnPipe();
+  }
+}
+
+// =====================
+// Sky foods
+// =====================
+function spawnSkyFood(){
+  skyFood.push({
+    x: Math.random()*canvas.width,
+    y: Math.random()*200,
+    emoji: foods[Math.floor(Math.random()*foods.length)]
+  });
+}
+
+function updateSkyFood(){
+  for(let i = skyFood.length-1;i>=0;i--){
+    skyFood[i].x -= foodSpeed;
+    if(skyFood[i].x < -50){
+      skyFood.splice(i,1);
+    }
+  }
+
+  if(Math.random()<0.01){
+    spawnSkyFood();
+  }
+}
+
+// =====================
+// Sheep movement
+// =====================
+function updateSheep(){
+  sheep.velocity += sheep.gravity;
+  sheep.y += sheep.velocity;
+
+  // hit ground or ceiling
+  if(sheep.y + sheep.h > canvas.height || sheep.y < 0){
+    endGame();
+  }
+}
+
+// =====================
+// Collision
+// =====================
+function checkCollision(){
+  for(const p of pipes){
+    // top pipe
+    if(sheep.x + sheep.w > p.x && sheep.x < p.x + pipeWidth){
+      if(sheep.y < p.top || sheep.y + sheep.h > p.bottom){
+        endGame();
+      }
+    }
+  }
+}
+
+// =====================
+// Draw
+// =====================
+function drawSheep(){
+  // simple cartoon sheep body
+  ctx.save();
+  ctx.fillStyle = "black";
+  ctx.beginPath();
+  ctx.arc(sheep.x + sheep.w/2, sheep.y + sheep.h/2, 20, 0, Math.PI*2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawPipes(){
+  ctx.fillStyle = "#8B4513"; // barn wood
+  for(const p of pipes){
+    // top
+    ctx.fillRect(p.x, 0, pipeWidth, p.top);
+    // bottom
+    ctx.fillRect(p.x, p.bottom, pipeWidth, canvas.height-p.bottom);
+  }
+}
+
+function drawSkyFood(){
+  ctx.font = "32px serif";
+  for(const f of skyFood){
+    ctx.fillText(f.emoji, f.x, f.y);
+  }
+}
+
+// =====================
+// Game Loop
+// =====================
+function gameLoop(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  if(!gameStarted){
+    drawSheep();
+    drawSkyFood();
+    return;
+  }
+
+  updateSheep();
+  updatePipes();
+  updateSkyFood();
+  checkCollision();
+
+  drawPipes();
+  drawSkyFood();
+  drawSheep();
+
+  if(!gameOver){
+    requestAnimationFrame(gameLoop);
+  }
+}
+
+// =====================
+// Input
+// =====================
+function jump(){
+  sheep.velocity = sheep.jumpStrength;
+}
+
+function handleInput(){
+  if(!gameStarted){
+    startGame();
+  } else if(gameOver){
+    restartGame();
+  } else {
+    jump();
+  }
+}
+
+window.addEventListener("mousedown", handleInput);
+window.addEventListener("touchstart", handleInput);
+
+// =====================
+// State handlers
+// =====================
+function startGame(){
+  document.getElementById("startScreen").style.display = "none";
+  gameStarted = true;
+  gameOver = false;
+  requestAnimationFrame(gameLoop);
+}
+
+function endGame(){
+  gameOver = true;
+  gameStarted = false;
+  document.getElementById("startScreen").innerText = "Tap to Restart";
+  document.getElementById("startScreen").style.display = "block";
+}
+
+function restartGame(){
+  resetGameState();
+  document.getElementById("startScreen").innerText = "";
+  document.getElementById("startScreen").style.display = "none";
+  gameStarted = true;
+  gameOver = false;
+  requestAnimationFrame(gameLoop);
+}
+
+// initial scenic spawns
+for(let i=0;i<5;i++) spawnSkyFood();
+
+drawSheep();
+drawSkyFood();
+</script>
+</body>
+</html>
